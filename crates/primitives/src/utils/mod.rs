@@ -18,6 +18,8 @@ mod hint;
 
 #[cfg(feature = "keccak-cache")]
 mod keccak_cache;
+#[cfg(all(feature = "keccak-cache", feature = "std"))]
+pub use keccak_cache::StatsGuard as KeccakCacheStatsGuard;
 
 // NOT PUBLIC API.
 #[doc(hidden)]
@@ -148,7 +150,10 @@ pub fn eip191_message<T: AsRef<[u8]>>(message: T) -> Vec<u8> {
 ///
 /// [`Keccak-256`]: https://en.wikipedia.org/wiki/SHA-3
 pub fn keccak256<T: AsRef<[u8]>>(bytes: T) -> B256 {
-    keccak256_impl(bytes.as_ref())
+    #[cfg(feature = "keccak-cache")]
+    return keccak_cache::compute(bytes.as_ref());
+    #[cfg(not(feature = "keccak-cache"))]
+    return keccak256_impl(bytes.as_ref());
 }
 
 /// Simple interface to the [`Keccak-256`] hash function,
@@ -408,6 +413,22 @@ mod tests {
             let hash2 = keccak256_impl(data);
             assert_eq!(hash1, hash2);
         }
+    }
+
+    #[test]
+    #[cfg(feature = "keccak-cache")]
+    fn test_keccak256_cache_basic() {
+        // Test that repeated inputs produce same results and cache works
+        let input = [0xAAu8; 47];
+        let hash1 = keccak256_cached(&input);
+        let hash2 = keccak256_cached(&input);
+        assert_eq!(hash1, hash2);
+
+        // Test oversized input bypasses cache but still works
+        let oversized = vec![0xBBu8; 300];
+        let hash1 = keccak256_cached(&oversized);
+        let hash2 = keccak256_impl(&oversized);
+        assert_eq!(hash1, hash2);
     }
 
     #[test]
