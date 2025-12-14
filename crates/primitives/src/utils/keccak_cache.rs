@@ -12,7 +12,7 @@ use core::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-const ENABLE_STATS: bool = false || option_env!("KECCAK_CACHE_STATS").is_some();
+const ENABLE_STATS: bool = true || option_env!("KECCAK_CACHE_STATS").is_some();
 
 /// Number of cache entries (must be a power of 2).
 const COUNT: usize = 1 << 17; // ~131k entries
@@ -150,6 +150,65 @@ fn hash_bytes(input: &[u8]) -> usize {
         ((hash >> 32) as usize) ^ (hash as usize)
     } else {
         hash as usize
+    }
+}
+
+/// Guard that prints keccak cache statistics to stderr when dropped.
+///
+/// Create at the start of your program to automatically print stats on exit:
+/// ```ignore
+/// let _guard = alloy_primitives::utils::KeccakCacheStatsGuard::new();
+/// ```
+#[cfg(feature = "std")]
+#[derive(Debug)]
+pub struct StatsGuard {
+    output: StatsOutput,
+}
+
+#[cfg(feature = "std")]
+#[derive(Debug)]
+enum StatsOutput {
+    Stderr,
+    File(std::path::PathBuf),
+}
+
+#[cfg(feature = "std")]
+impl StatsGuard {
+    /// Creates a guard that prints stats to stderr on drop.
+    pub fn new() -> Self {
+        Self { output: StatsOutput::Stderr }
+    }
+
+    /// Creates a guard that writes stats to a file on drop.
+    pub fn to_file(path: impl Into<std::path::PathBuf>) -> Self {
+        Self { output: StatsOutput::File(path.into()) }
+    }
+}
+
+#[cfg(feature = "std")]
+impl Default for StatsGuard {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "std")]
+impl Drop for StatsGuard {
+    fn drop(&mut self) {
+        let s = stats::format();
+        if s.contains("DISABLED") || s.lines().count() <= 2 {
+            return;
+        }
+        match &self.output {
+            StatsOutput::Stderr => {
+                eprintln!("{s}");
+            }
+            StatsOutput::File(path) => {
+                if let Err(e) = std::fs::write(path, &s) {
+                    eprintln!("Failed to write keccak cache stats to {}: {e}", path.display());
+                }
+            }
+        }
     }
 }
 
